@@ -6,29 +6,21 @@ use std::path::Path;
 use std::process::Command;
 
 /// Helper function to execute podman commands with consistent error handling
-fn execute_podman_command(args: &[&str], _description: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn execute_podman_command(args: &[&str]) -> Result<bool, Box<dyn std::error::Error>> {
     let status = Command::new("podman")
         .args(args)
         .status()?;
     
-    if status.success() {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    Ok(status.success())
 }
 
 /// Helper function to execute system commands with consistent error handling
-fn execute_system_command(cmd: &str, args: &[&str], _description: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn execute_system_command(cmd: &str, args: &[&str]) -> Result<bool, Box<dyn std::error::Error>> {
     let status = Command::new(cmd)
         .args(args)
         .status()?;
     
-    if status.success() {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    Ok(status.success())
 }
 
 /// Error type for the application
@@ -111,7 +103,7 @@ fn detect_os() -> OSType {
 }
 
 fn is_podman_installed() -> bool {
-    execute_podman_command(&["--version"], "Check podman version")
+    execute_podman_command(&["--version"])
         .unwrap_or(false)
 }
 
@@ -121,21 +113,21 @@ fn install_podman(os_type: &OSType) -> AppResult<()> {
     let success = match os_type {
         OSType::Ubuntu | OSType::Debian => {
             // First update package list
-            if !execute_system_command("sudo", &["apt", "update"], "Update package list")? {
+            if !execute_system_command("sudo", &["apt", "update"])? {
                 return Err("Failed to update package list".into());
             }
             
             // Then install podman
-            execute_system_command("sudo", &["apt", "install", "-y", "podman"], "Install podman")?
+            execute_system_command("sudo", &["apt", "install", "-y", "podman"])?
         }
         OSType::Fedora => {
-            execute_system_command("sudo", &["dnf", "install", "-y", "podman"], "Install podman")?
+            execute_system_command("sudo", &["dnf", "install", "-y", "podman"])?
         }
         OSType::RedHat => {
-            execute_system_command("sudo", &["yum", "install", "-y", "podman"], "Install podman")?
+            execute_system_command("sudo", &["yum", "install", "-y", "podman"])?
         }
         OSType::ArchLinux => {
-            execute_system_command("sudo", &["pacman", "-S", "--noconfirm", "podman"], "Install podman")?
+            execute_system_command("sudo", &["pacman", "-S", "--noconfirm", "podman"])?
         }
         OSType::Unknown => {
             return Err("Unsupported OS for automatic podman installation".into());
@@ -314,59 +306,27 @@ fn pod_exists(pod_name: &str) -> bool {
 }
 
 fn generate_pod_command(pod: &Pod) -> String {
-    let mut args = vec!["podman", "pod", "create", "--name", &pod.name];
-    let mut port_args = Vec::new();
+    let mut cmd = format!("podman pod create --name {}", pod.name);
     
     // Collect all unique ports from containers in the pod
     let mut all_ports = HashSet::new();
     for container in &pod.containers {
         for port in &container.ports {
-            all_ports.insert(port.as_str());
+            all_ports.insert(port);
         }
     }
     
     // Add port mappings to pod creation
-    for port in all_ports {
-        port_args.push("-p");
-        port_args.push(port);
+    for port in &all_ports {
+        cmd.push_str(&format!(" -p {}", port));
     }
     
-    args.extend(port_args);
-    args.join(" ")
+    cmd
 }
 
 fn generate_container_command(pod_name: &str, container: &Container, data_path: &str) -> String {
-    let mut args = vec![
-        "podman".to_string(),
-        "run".to_string(), 
-        "-d".to_string(), 
-        "--pod".to_string(), 
-        pod_name.to_string(), 
-        "--name".to_string(), 
-        container.name.clone()
-    ];
-    
-    // Add environment variables
-    for (key, value) in &container.env_vars {
-        args.push("-e".to_string());
-        args.push(format!("{}={}", key, value));
-    }
-    
-    // Add mount points with data_path prefix
-    for mount in &container.mounts {
-        args.push("-v".to_string());
-        // Parse mount string and prefix host path with data_path
-        if let Some((host_path, container_path)) = mount.split_once(':') {
-            let prefixed_mount = format!("{}{}:{}", data_path, host_path, container_path);
-            args.push(prefixed_mount);
-        } else {
-            args.push(mount.clone());
-        }
-    }
-    
-    // Use the explicit image name from config
-    args.push(container.image.clone());
-    
+    let mut args = vec!["podman".to_string()];
+    args.extend(build_container_args(pod_name, container, data_path));
     args.join(" ")
 }
 
@@ -433,12 +393,7 @@ fn create_pod(pod: &Pod, data_path: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn create_container_in_pod(pod_name: &str, container: &Container, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Creating container '{}' in pod '{}'", container.name, pod_name);
-    
-    // Display the command that will be executed
-    println!("Executing command: {}", generate_container_command(pod_name, container, data_path));
-    
+fn build_container_args(pod_name: &str, container: &Container, data_path: &str) -> Vec<String> {
     let mut args = vec![
         "run".to_string(), "-d".to_string(), "--pod".to_string(), pod_name.to_string(), 
         "--name".to_string(), container.name.clone()
@@ -455,8 +410,7 @@ fn create_container_in_pod(pod_name: &str, container: &Container, data_path: &st
         args.push("-v".to_string());
         // Parse mount string and prefix host path with data_path
         if let Some((host_path, container_path)) = mount.split_once(':') {
-            let prefixed_mount = format!("{}{}:{}", data_path, host_path, container_path);
-            args.push(prefixed_mount);
+            args.push(format!("{}{}:{}", data_path, host_path, container_path));
         } else {
             args.push(mount.clone());
         }
@@ -464,6 +418,16 @@ fn create_container_in_pod(pod_name: &str, container: &Container, data_path: &st
     
     // Use the explicit image name from config
     args.push(container.image.clone());
+    args
+}
+
+fn create_container_in_pod(pod_name: &str, container: &Container, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Creating container '{}' in pod '{}'", container.name, pod_name);
+    
+    let args = build_container_args(pod_name, container, data_path);
+    
+    // Display the command that will be executed
+    println!("Executing command: podman {}", args.join(" "));
     
     // Convert to string refs for Command
     let string_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -592,7 +556,7 @@ fn stop_pod(config: &Config, pod_name: &str) -> Result<(), Box<dyn std::error::E
 
 fn get_container_current_image(container_name: &str) -> Option<String> {
     match Command::new("podman")
-        .args(&["inspect", container_name, "--format", "{{.Image}}"])
+        .args(&["inspect", container_name, "--format", "{{.Config.Image}}"])
         .output()
     {
         Ok(output) => {
@@ -626,8 +590,25 @@ fn needs_upgrade(container: &Container) -> bool {
     match get_container_current_image(&container.name) {
         Some(current_image) => {
             let expected_image = &container.image;
-            if current_image == *expected_image {
-                println!("Container '{}' is already using the correct image: {}", container.name, current_image);
+            
+            // Normalize image names by removing registry prefixes for comparison
+            let normalize_image = |img: &str| -> String {
+                // Remove common registry prefixes
+                if let Some(stripped) = img.strip_prefix("docker.io/library/") {
+                    stripped.to_string()
+                } else if let Some(stripped) = img.strip_prefix("docker.io/") {
+                    stripped.to_string()
+                } else {
+                    img.to_string()
+                }
+            };
+            
+            let normalized_current = normalize_image(&current_image);
+            let normalized_expected = normalize_image(expected_image);
+            
+            if normalized_current == normalized_expected {
+                println!("Container '{}' is already using the correct image: {} (current: {})", 
+                    container.name, normalized_current, current_image);
                 false
             } else {
                 println!("Container '{}' needs upgrade: current='{}', expected='{}'", 
@@ -891,31 +872,84 @@ fn stop_mode(config_path: &str, pod_name: Option<&str>) -> Result<(), Box<dyn st
 fn prune_mode() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Running Prune Mode ===");
     
-    // Prune unused images
-    println!("Pruning unused images...");
-    let unused_status = Command::new("podman")
-        .args(&["image", "prune", "-f"])
+    // Prune all images
+    println!("Pruning all images...");
+    let prune_status = Command::new("podman")
+        .args(&["image", "prune", "-a"])
         .status()?;
     
-    if unused_status.success() {
-        println!("Successfully pruned unused images");
+    if prune_status.success() {
+        println!("Successfully pruned all images");
     } else {
-        println!("Warning: Failed to prune unused images");
-    }
-    
-    // Prune untagged images (dangling images)
-    println!("Pruning untagged/dangling images...");
-    let untagged_status = Command::new("podman")
-        .args(&["image", "prune", "-f", "--filter", "dangling=true"])
-        .status()?;
-    
-    if untagged_status.success() {
-        println!("Successfully pruned untagged images");
-    } else {
-        println!("Warning: Failed to prune untagged images");
+        println!("Warning: Failed to prune all images");
     }
     
     println!("=== Prune completed successfully ===");
+    Ok(())
+}
+
+fn list_mode(config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Listing Pods and Containers ===");
+    
+    let config = load_config(config_path)?;
+    
+    // Get pod status from podman
+    let pod_output = Command::new("podman")
+        .args(&["pod", "ps", "--format", "{{.Name}}\t{{.Status}}"])
+        .output()?;
+    
+    let mut pod_status_map: HashMap<String, String> = HashMap::new();
+    if pod_output.status.success() {
+        let pod_status_str = String::from_utf8_lossy(&pod_output.stdout);
+        for line in pod_status_str.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() >= 2 {
+                pod_status_map.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+    }
+    
+    // Get container status from podman
+    let container_output = Command::new("podman")
+        .args(&["ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"])
+        .output()?;
+    
+    let mut container_status_map: HashMap<String, (String, String)> = HashMap::new();
+    if container_output.status.success() {
+        let container_status_str = String::from_utf8_lossy(&container_output.stdout);
+        for line in container_status_str.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() >= 3 {
+                container_status_map.insert(
+                    parts[0].to_string(),
+                    (parts[1].to_string(), parts[2].to_string())
+                );
+            }
+        }
+    }
+    
+    // Display pods and their containers
+    for pod in &config.pods {
+        let pod_status = pod_status_map.get(&pod.name)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
+        
+        println!("\nPod: {} (Status: {})", pod.name, pod_status);
+        println!("  Containers:");
+        
+        for container in &pod.containers {
+            let (container_status, actual_image) = container_status_map.get(&container.name)
+                .cloned()
+                .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
+            
+            println!("    - Name: {}", container.name);
+            println!("      Expected Image: {}", container.image);
+            println!("      Actual Image: {}", actual_image);
+            println!("      Status: {}", container_status);
+        }
+    }
+    
+    println!("\n=== List completed successfully ===");
     Ok(())
 }
 
@@ -942,6 +976,7 @@ fn print_usage() {
     println!();
     println!("Modes:");
     println!("  setup                     - Install podman, create directories, create pods, pull images, and stop containers/pods");
+    println!("  list                      - List all pods with their containers, status, and images");
     println!("  prune                     - Prune unused and untagged images");
     println!("  upgrade                   - Check container image versions and upgrade if needed for all containers");
     println!("  upgrade <container_name>  - Check and upgrade specific container if needed");
@@ -988,6 +1023,14 @@ fn main() {
                 std::process::exit(1);
             }
             setup_mode(&config_path)
+        }
+        "list" => {
+            if pod_name.is_some() {
+                eprintln!("Error: 'list' mode does not accept pod name parameter");
+                print_usage();
+                std::process::exit(1);
+            }
+            list_mode(&config_path)
         }
         "prune" => {
             if pod_name.is_some() {

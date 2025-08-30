@@ -36,16 +36,14 @@ The binary will be available at `target/release/podman_deploy`.
 ### Basic Syntax
 
 ```bash
-podman_deploy [--config <path>] <mode> [container_name/pod_name]
+podman_deploy <mode> [container_name/pod_name]
 ```
-
-### Command Line Options
-
-- `--config <path>`: Specify custom config file path (optional)
 
 ### Modes
 
 - `setup`: Install podman, create directories, create pods, pull images, and stop containers/pods
+- `list`: List all pods with their containers, status, and images
+- `prune`: Prune unused and untagged images
 - `upgrade`: Check container image versions and upgrade if needed for all containers
 - `upgrade <container_name>`: Check and upgrade specific container if needed
 - `start`: Start all pods
@@ -56,11 +54,14 @@ podman_deploy [--config <path>] <mode> [container_name/pod_name]
 ### Examples
 
 ```bash
-# Initial setup with default config
+# Initial setup
 podman_deploy setup
 
-# Setup with custom config file
-podman_deploy --config /path/to/config.yaml setup
+# List all pods and containers with status
+podman_deploy list
+
+# Prune unused images
+podman_deploy prune
 
 # Start all pods
 podman_deploy start
@@ -70,6 +71,9 @@ podman_deploy start web-pod
 
 # Stop all pods
 podman_deploy stop
+
+# Stop specific pod
+podman_deploy stop database-pod
 
 # Upgrade all containers
 podman_deploy upgrade

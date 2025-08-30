@@ -4,6 +4,49 @@ All notable changes to the Podman Deploy project will be documented in this file
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2025-08-30
+
+### Added
+- **List Mode**: New `list` command to display all pods with their containers, status, and images
+  - Shows both expected and actual container images
+  - Displays real-time pod and container status from Podman
+  - Provides comprehensive overview of deployment state
+
+- **Prune Mode**: New `prune` command for image cleanup
+  - Uses `podman image prune -a` to remove all unused images
+  - Helps maintain clean container environment
+  - Optimizes disk space usage
+
+### Improved
+- **Code Optimization**
+  - Consolidated duplicate container argument building logic into reusable `build_container_args` function
+  - Optimized string operations in `generate_pod_command` using format! and push_str
+  - Removed unused description parameters from command execution functions
+  - Improved memory efficiency by reducing string allocations
+
+- **Upgrade Intelligence**
+  - Enhanced image comparison logic with registry prefix normalization
+  - Handles docker.io/library/ and docker.io/ prefixes automatically
+  - Skips unnecessary upgrades when container images are already up-to-date
+  - Improved upgrade detection accuracy
+
+- **Performance Enhancements**
+  - Streamlined command generation functions
+  - Reduced redundant string operations
+  - Optimized container creation workflow
+  - More efficient error handling patterns
+
+### Fixed
+- Container image inspection now uses correct format template `{{.Config.Image}}`
+- Improved image tag comparison for upgrade decisions
+- Better handling of registry prefix variations in image names
+
+### Documentation
+- Updated README.md with complete mode documentation including new `list` and `prune` commands
+- Corrected command syntax examples to reflect actual usage
+- Added comprehensive examples for all available modes
+- Enhanced feature descriptions and usage guidelines
+
 ## [0.1.0] - 2025-08-30
 
 ### Added
