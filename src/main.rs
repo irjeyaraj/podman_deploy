@@ -888,16 +888,38 @@ fn stop_mode(config_path: &str, pod_name: Option<&str>) -> Result<(), Box<dyn st
     Ok(())
 }
 
-fn find_config_file(custom_path: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
-    // If custom path is provided, use it directly
-    if let Some(path) = custom_path {
-        if Path::new(path).exists() {
-            return Ok(path.to_string());
-        } else {
-            return Err(format!("Config file not found at specified path: {}", path).into());
-        }
+fn prune_mode() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Running Prune Mode ===");
+    
+    // Prune unused images
+    println!("Pruning unused images...");
+    let unused_status = Command::new("podman")
+        .args(&["image", "prune", "-f"])
+        .status()?;
+    
+    if unused_status.success() {
+        println!("Successfully pruned unused images");
+    } else {
+        println!("Warning: Failed to prune unused images");
     }
     
+    // Prune untagged images (dangling images)
+    println!("Pruning untagged/dangling images...");
+    let untagged_status = Command::new("podman")
+        .args(&["image", "prune", "-f", "--filter", "dangling=true"])
+        .status()?;
+    
+    if untagged_status.success() {
+        println!("Successfully pruned untagged images");
+    } else {
+        println!("Warning: Failed to prune untagged images");
+    }
+    
+    println!("=== Prune completed successfully ===");
+    Ok(())
+}
+
+fn find_config_file() -> Result<String, Box<dyn std::error::Error>> {
     // Search in fallback locations
     let search_paths = vec![
         format!("{}/.config/podman_deploy/config.yaml", env::var("HOME").unwrap_or_default()),
@@ -916,12 +938,11 @@ fn find_config_file(custom_path: Option<&str>) -> Result<String, Box<dyn std::er
 }
 
 fn print_usage() {
-    println!("Usage: podman_deploy [--config <path>] <mode> [container_name/pod_name]");
-    println!("Options:");
-    println!("  --config <path>           - Specify custom config file path");
+    println!("Usage: podman_deploy <mode> [container_name/pod_name]");
     println!();
     println!("Modes:");
     println!("  setup                     - Install podman, create directories, create pods, pull images, and stop containers/pods");
+    println!("  prune                     - Prune unused and untagged images");
     println!("  upgrade                   - Check container image versions and upgrade if needed for all containers");
     println!("  upgrade <container_name>  - Check and upgrade specific container if needed");
     println!("  start                     - Start all pods");
@@ -940,43 +961,18 @@ fn main() {
     
     let args: Vec<String> = env::args().collect();
     
-    // Parse arguments for --config option
-    let mut custom_config_path: Option<&str> = None;
-    let mut mode_arg_index = 1;
-    let mut pod_name: Option<&str> = None;
-    
-    // Check for --config option
-    if args.len() >= 3 && args[1] == "--config" {
-        custom_config_path = Some(&args[2]);
-        mode_arg_index = 3;
-    }
-    
-    // Validate argument count based on whether --config was used
-    let min_args = if custom_config_path.is_some() { 4 } else { 2 };
-    let max_args = if custom_config_path.is_some() { 5 } else { 3 };
-    
-    if args.len() < min_args || args.len() > max_args {
+    // Validate argument count
+    if args.len() < 2 || args.len() > 3 {
         eprintln!("Error: Invalid number of arguments");
         print_usage();
         std::process::exit(1);
     }
     
-    // Extract mode and optional pod/container name
-    if mode_arg_index >= args.len() {
-        eprintln!("Error: Mode not specified");
-        print_usage();
-        std::process::exit(1);
-    }
+    let mode = &args[1];
+    let pod_name: Option<&str> = if args.len() == 3 { Some(&args[2]) } else { None };
     
-    let mode = &args[mode_arg_index];
-    
-    // Check for pod/container name parameter
-    if args.len() > mode_arg_index + 1 {
-        pod_name = Some(&args[mode_arg_index + 1]);
-    }
-    
-    // Find the config file
-    let config_path = match find_config_file(custom_config_path) {
+    // Find the config file using default search locations
+    let config_path = match find_config_file() {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -992,6 +988,14 @@ fn main() {
                 std::process::exit(1);
             }
             setup_mode(&config_path)
+        }
+        "prune" => {
+            if pod_name.is_some() {
+                eprintln!("Error: 'prune' mode does not accept pod name parameter");
+                print_usage();
+                std::process::exit(1);
+            }
+            prune_mode()
         }
         "upgrade" => upgrade_mode(&config_path, pod_name),
         "start" => start_mode(&config_path, pod_name),
